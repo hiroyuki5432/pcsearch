@@ -1,0 +1,61 @@
+{
+  "database_path": "%LOCALAPPDATA%\\PCFullTextSearch\\search_index_v2.db",
+  "inventory_report_path": "data/inventory_report.json",
+  "roots": [
+    "%USERPROFILE%\\Documents"
+  ],
+  "extensions": [
+    ".pdf",
+    ".xlsx",
+    ".xls",
+    ".docx",
+    ".pptx",
+    ".csv",
+    ".txt"
+  ],
+  "exclude_folder_names": [
+    ".git",
+    ".svn",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    "imports_staging",
+    "00_old",
+    "01_old",
+    "old",
+    "backup",
+    "backups",
+    "バックアップ",
+    "$RECYCLE.BIN",
+    "System Volume Information"
+  ],
+  "exclude_folder_globs": [
+    "*_bk",
+    "*_backup",
+    "backup_*",
+    "*バックアップ*",
+    "venv*"
+  ],
+  "exclude_file_globs": [
+    "~$*",
+    "*.tmp",
+    "*.temp",
+    "*.part"
+  ],
+  "exclude_folder_paths": [],
+  "exclude_file_paths": [],
+  "file_policies": {},
+  "table_head_rows": 5000,
+  "max_file_size_mb": 50,
+  "max_text_chars_per_file": 1000000,
+  "chunk_chars": 4000,
+  "chunk_overlap_chars": 250,
+  "index_workers": 2,
+  "database_warning_mb": 10240,
+  "auto_index_interval_minutes": 0,
+  "host": "127.0.0.1",
+  "port": 8765
+}

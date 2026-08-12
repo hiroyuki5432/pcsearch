@@ -1,0 +1,20 @@
+# Local user data and machine-specific settings
+/config.json
+/data/
+
+# Python/runtime files
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Credentials and editor state
+.env
+.env.*
+.vscode/
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store

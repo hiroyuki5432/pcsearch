@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PC全文検索</title>
+  <style>
+    :root { color-scheme:light dark; --bg:light-dark(#f2f3f0,#1c1f1d); --surface:light-dark(#fbfbfa,#232724); --surface-strong:light-dark(#ffffff,#292d2a); --soft:light-dark(#f0f1ee,#2b302c); --text:light-dark(#252825,#e3e7e2); --muted:light-dark(#6b716c,#a6ada7); --border:light-dark(#d7dad5,#3b413c); --primary:light-dark(#2f665b,#86b8ab); --primary-strong:light-dark(#245348,#a2cbbf); --primary-soft:light-dark(#e5eeeb,#2d403a); --danger:light-dark(#a83e48,#d98289); --warn:light-dark(#92621f,#d2a563); --ok:light-dark(#367462,#78ad9d); --shadow:0 8px 24px rgba(25,32,27,.07); }
+    * { box-sizing:border-box; }
+    html,body { height:100%; }
+    body { margin:0; overflow:hidden; display:flex; flex-direction:column; color:var(--text); background:var(--bg); font-family:"Segoe UI Variable Text","Meiryo UI","Yu Gothic UI",sans-serif; font-size:13.5px; font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased; }
+    body[data-theme="light"] { color-scheme:light; }
+    body[data-theme="dark"] { color-scheme:dark; }
+    button,input,select,textarea { color:inherit; font:inherit; }
+    button,input,select,textarea { border:1px solid var(--border); border-radius:6px; background:var(--surface-strong); }
+    button { min-height:36px; padding:0 12px; cursor:pointer; font-weight:600; }
+    button:hover:not(:disabled) { border-color:color-mix(in srgb,var(--primary) 48%,var(--border)); background:var(--soft); }
+    button:disabled { cursor:default; opacity:.5; }
+    button:focus-visible,input:focus,select:focus,textarea:focus { outline:2px solid color-mix(in srgb,var(--primary) 30%,transparent); outline-offset:1px; border-color:var(--primary); }
+    .primary { color:light-dark(#fff,#14201c); border-color:var(--primary); background:var(--primary); }
+    .primary:hover:not(:disabled) { background:var(--primary-strong); }
+    .danger { color:#fff; border-color:var(--danger); background:var(--danger); }
+    .ghost { border-color:transparent; background:transparent; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:58px; padding:8px 20px; border-bottom:1px solid var(--border); background:var(--surface); }
+    .brand { display:flex; align-items:center; min-width:0; gap:11px; }
+    .brand-mark { width:32px; height:32px; display:grid; place-items:center; border:1px solid var(--border); border-radius:7px; color:var(--primary); background:var(--surface-strong); font-size:18px; }
+    .brand strong { display:block; font-size:15px; letter-spacing:.01em; }
+    .brand small,.muted { color:var(--muted); }
+    .header-actions { display:flex; align-items:center; gap:8px; }
+    .status-pill { max-width:360px; padding:5px 1px 5px 8px; overflow:hidden; color:var(--muted); font-size:12px; white-space:nowrap; text-overflow:ellipsis; }
+    .status-pill::before { content:""; display:inline-block; width:7px; height:7px; margin-right:7px; border-radius:50%; background:var(--ok); }
+    .status-pill.busy::before { background:var(--warn); box-shadow:0 0 0 4px color-mix(in srgb,var(--warn) 15%,transparent); }
+    .status-pill.error::before { background:var(--danger); }
+    .overview { display:flex; align-items:center; gap:0; min-height:36px; padding:0 20px; overflow-x:auto; border-bottom:1px solid var(--border); background:var(--surface); scrollbar-width:thin; }
+    .metric { flex:none; padding:0 14px; border-right:1px solid var(--border); color:var(--muted); font-size:12px; }
+    .metric:first-child { padding-left:0; }
+    .warning { display:none; padding:7px 20px; color:light-dark(#6e4a1e,#d8b782); background:light-dark(#f7f0e3,#352e23); border-bottom:1px solid color-mix(in srgb,var(--warn) 22%,var(--border)); }
+    .warning.show { display:flex; align-items:center; justify-content:space-between; gap:14px; }
+    .search-area { padding:11px 20px 9px; border-bottom:1px solid var(--border); background:var(--surface); }
+    .toolbar { display:grid; grid-template-columns:minmax(260px,1fr) 125px 130px 92px; gap:9px; }
+    .toolbar input,.toolbar select { width:100%; min-height:40px; padding:0 12px; }
+    .advanced-toggle { min-height:30px; padding:4px 2px; color:var(--muted); background:transparent; border:0; font-size:12px; }
+    .advanced { display:none; grid-template-columns:1.2fr repeat(2,minmax(120px,.45fr)) minmax(120px,.55fr) minmax(130px,.6fr) auto; gap:9px; margin-top:8px; align-items:end; }
+    .advanced.open { display:grid; }
+    label.field { display:grid; gap:5px; color:var(--muted); font-size:12px; }
+    label.field input,label.field select { min-height:36px; padding:0 10px; }
+    .check { min-height:36px; display:flex; align-items:center; gap:7px; color:var(--muted); white-space:nowrap; }
+    .check input { width:16px; height:16px; }
+    .shell { min-height:0; flex:1; display:grid; grid-template-columns:minmax(350px,43%) minmax(420px,57%); margin:12px 20px 16px; overflow:hidden; border:1px solid var(--border); border-radius:8px; background:var(--surface); box-shadow:var(--shadow); }
+    .results,.preview { min-width:0; min-height:0; display:flex; flex-direction:column; }
+    .results { border-right:1px solid var(--border); }
+    .pane-head { min-height:44px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 14px; border-bottom:1px solid var(--border); background:var(--soft); }
+    .pane-head small { color:var(--muted); }
+    #resultList { min-height:0; overflow-y:auto; }
+    .result { width:100%; display:block; min-height:0; padding:11px 14px; border:0; border-bottom:1px solid var(--border); border-radius:0; text-align:left; background:var(--surface); font-weight:400; }
+    .result:hover { background:var(--soft); }
+    .result.selected { padding-left:11px; border-left:3px solid var(--primary); background:var(--primary-soft); }
+    .result-top { display:flex; align-items:center; gap:8px; }
+    .filename { flex:1; min-width:0; overflow:hidden; font-weight:650; font-size:13.5px; white-space:nowrap; text-overflow:ellipsis; }
+    .badge { flex:none; padding:2px 5px; border:1px solid color-mix(in srgb,var(--primary) 20%,var(--border)); border-radius:4px; color:var(--primary); background:transparent; font-size:10px; font-weight:650; }
+    .badge.meta { color:var(--warn); }
+    .path { margin-top:4px; overflow:hidden; color:var(--muted); font-size:12px; white-space:nowrap; text-overflow:ellipsis; }
+    .snippet { margin-top:6px; overflow:hidden; color:var(--muted); line-height:1.55; font-size:12px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+    .result.selected .snippet { -webkit-line-clamp:3; }
+    .meta-line { display:flex; flex-wrap:wrap; gap:5px 11px; margin-top:6px; color:var(--muted); font-size:12px; }
+    mark { padding:0 1px; border-radius:2px; color:inherit; background:light-dark(#efe0a2,#5d5330); }
+    .preview-head { min-height:68px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 16px; border-bottom:1px solid var(--border); }
+    .preview-title { min-width:0; }
+    .eyebrow { color:var(--muted); text-transform:uppercase; letter-spacing:.1em; font-size:10px; font-weight:650; }
+    .preview-title strong { display:block; margin-top:3px; overflow:hidden; font-size:16px; white-space:nowrap; text-overflow:ellipsis; }
+    .preview-title span { display:block; margin-top:3px; overflow:hidden; color:var(--muted); font-size:12px; white-space:nowrap; text-overflow:ellipsis; }
+    .actions { display:flex; gap:7px; }
+    .actions button { min-height:36px; padding:0 11px; }
+    .preview-tools { display:flex; align-items:center; gap:8px; min-height:44px; padding:6px 16px; border-bottom:1px solid var(--border); background:var(--soft); }
+    .preview-tools button { min-height:30px; padding:0 9px; }
+    .preview-tools .spacer { flex:1; }
+    .preview-body { min-height:0; flex:1; overflow-y:auto; padding:18px 22px 30px; }
+    .preview-meta { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:12px; }
+    .preview-meta span { padding:3px 7px; border:1px solid var(--border); border-radius:4px; color:var(--muted); background:transparent; font-size:12px; }
+    .location { margin:0 0 14px; color:var(--muted); font-size:12px; }
+    .content { padding-top:14px; border-top:1px solid var(--border); line-height:1.9; letter-spacing:.005em; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .empty { min-height:190px; display:grid; place-items:center; padding:24px; color:var(--muted); text-align:center; }
+    .load-more { width:calc(100% - 24px); margin:12px; }
+    .mobile-tabs { display:none; }
+    .modal { position:fixed; inset:0; z-index:30; display:grid; place-items:center; padding:20px; background:rgba(22,26,23,.48); backdrop-filter:blur(2px); }
+    .modal[hidden] { display:none; }
+    .modal-card { width:min(1100px,96vw); height:min(820px,92vh); display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--border); border-radius:9px; background:var(--surface); box-shadow:0 20px 64px rgba(0,0,0,.22); }
+    .modal-head { flex:none; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border-bottom:1px solid var(--border); }
+    .modal-head h2 { margin:0; font-size:18px; }
+    .modal-tabs { flex:none; display:flex; gap:4px; min-height:45px; padding:8px 14px 0; overflow-x:auto; border-bottom:1px solid var(--border); }
+    .modal-tabs button { min-height:36px; border:0; border-bottom:2px solid transparent; border-radius:0; color:var(--muted); background:transparent; white-space:nowrap; }
+    .modal-tabs button.active { color:var(--text); border-bottom-color:var(--primary); background:transparent; }
+    .modal-body { min-height:0; flex:1; overflow:auto; padding:18px; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
+    .card { padding:13px; border:1px solid var(--border); border-radius:6px; background:var(--soft); }
+    .card small { display:block; color:var(--muted); }
+    .card strong { display:block; margin-top:5px; font-size:18px; }
+    .section-title { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:18px 0 8px; }
+    .section-title h3 { margin:0; font-size:14px; }
+    .data-list { border:1px solid var(--border); border-radius:6px; overflow:hidden; }
+    .data-row { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 12px; padding:10px 12px; border-bottom:1px solid var(--border); }
+    .data-row:last-child { border-bottom:0; }
+    .data-row strong,.data-row .row-path { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .row-path,.row-meta { color:var(--muted); font-size:12px; }
+    .row-actions { grid-column:2; grid-row:1 / span 2; display:flex; align-items:center; gap:5px; }
+    .row-actions button,.row-actions select { min-height:30px; padding:0 8px; font-size:12px; }
+    .settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .settings-grid textarea { width:100%; min-height:110px; padding:10px; resize:vertical; }
+    .settings-grid input { width:100%; min-height:38px; padding:0 10px; }
+    .wide { grid-column:1 / -1; }
+    .toast-area { position:fixed; right:18px; bottom:18px; z-index:60; display:grid; gap:8px; }
+    .toast { max-width:420px; padding:11px 14px; border:1px solid var(--border); border-left:3px solid var(--primary); border-radius:5px; background:var(--surface-strong); box-shadow:var(--shadow); }
+    .toast.error { border-left-color:var(--danger); }
+    @media (max-width:900px) {
+      body { overflow:auto; }
+      .status-pill { display:none; }
+      .toolbar { grid-template-columns:1fr 1fr; }
+      .toolbar input { grid-column:1 / -1; }
+      .advanced { grid-template-columns:1fr 1fr; }
+      .shell { display:block; min-height:620px; margin-top:8px; overflow:hidden; }
+      .mobile-tabs { display:flex; padding:0 18px; background:var(--surface); border-bottom:1px solid var(--border); }
+      .mobile-tabs button { flex:1; border:0; border-radius:0; background:transparent; }
+      .mobile-tabs button.active { color:var(--primary); border-bottom:3px solid var(--primary); }
+      .results { height:calc(100vh - 265px); border-right:0; }
+      .preview { display:none; height:calc(100vh - 265px); }
+      .shell.show-preview .results { display:none; }
+      .shell.show-preview .preview { display:flex; }
+      .cards { grid-template-columns:1fr; }
+      .settings-grid { grid-template-columns:1fr; }
+      .wide { grid-column:auto; }
+    }
+    @media (max-width:560px) {
+      header { padding:9px 12px; }
+      .brand small,.header-actions .manage-label { display:none; }
+      .overview,.search-area { padding-left:12px; padding-right:12px; }
+      .toolbar { grid-template-columns:1fr 1fr; }
+      .toolbar button { grid-column:auto; }
+      .advanced { grid-template-columns:1fr; }
+      .shell { margin:8px 8px 10px; }
+      .preview-head { align-items:flex-start; }
+      .actions { flex-direction:column; }
+      .modal { padding:7px; }
+      .modal-card { width:100%; max-height:97vh; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><div class="brand-mark" aria-hidden="true">⌕</div><div><strong>PC全文検索</strong><small>文書の中身を、PC内だけで検索</small></div></div>
+    <div class="header-actions"><button type="button" id="indexButton">索引を更新</button><button type="button" id="themeButton" aria-label="表示テーマを切り替え">◐</button><button type="button" id="manageButton"><span class="manage-label">管理</span></button><div class="status-pill" id="statusText" role="status" aria-live="polite">状態を確認中…</div></div>
+  </header>
+  <div class="overview" id="overview"><span class="metric">読込中…</span></div>
+  <div class="warning" id="warning"><span id="warningText"></span><button type="button" class="ghost" id="warningAction">確認</button></div>
+  <div class="search-area">
+    <form id="searchForm">
+      <div class="toolbar">
+        <input id="query" type="search" aria-label="検索語" placeholder="本文・ファイル名・保存場所を検索" autocomplete="off" autofocus>
+        <select id="extension" aria-label="ファイル形式"><option value="">すべての形式</option><option value="pdf">PDF</option><option value="excel">Excel</option><option value="word">Word</option><option value="powerpoint">PowerPoint</option><option value="csv">CSV</option><option value="txt">TXT</option></select>
+        <select id="mode" aria-label="検索方法"><option value="and">すべて含む</option><option value="or">いずれか含む</option></select>
+        <button type="submit" class="primary">検索</button>
+      </div>
+      <button type="button" class="advanced-toggle" id="advancedToggle">＋ 絞り込み</button>
+      <div class="advanced" id="advanced">
+        <label class="field">場所<input id="folderFilter" placeholder="フォルダのパス"></label>
+        <label class="field">更新日（開始）<input id="dateFrom" type="date"></label>
+        <label class="field">更新日（終了）<input id="dateTo" type="date"></label>
+        <label class="field">抽出状態<select id="statusFilter"><option value="">すべて</option><option value="ok,truncated">本文あり</option><option value="empty,metadata_only">本文なし</option><option value="error">抽出エラー</option><option value="too_large,truncated">巨大・切り詰め</option></select></label>
+        <label class="field">並び順<select id="sort"><option value="relevance">関連度</option><option value="modified_desc">更新日・新しい順</option><option value="modified_asc">更新日・古い順</option><option value="name">ファイル名</option><option value="size_desc">サイズ</option></select></label>
+        <label class="check"><input id="contentOnly" type="checkbox">本文一致のみ</label>
+      </div>
+    </form>
+  </div>
+  <div class="mobile-tabs"><button type="button" id="resultTab" class="active">検索結果</button><button type="button" id="previewTab">プレビュー</button></div>
+  <main class="shell" id="shell">
+    <section class="results" aria-label="検索結果">
+      <div class="pane-head"><strong>検索結果</strong><small id="resultCount">0件</small></div>
+      <div id="resultList" tabindex="-1"><div class="empty">検索語を入力してください</div></div>
+    </section>
+    <article class="preview" aria-label="プレビュー">
+      <div class="preview-head"><div class="preview-title"><div class="eyebrow">Preview</div><strong id="previewName">文書を選択</strong><span id="previewPath"></span></div><div class="actions"><button id="folderButton" type="button" disabled>場所</button><button id="openButton" type="button" disabled>開く</button></div></div>
+      <div class="preview-tools"><button type="button" id="previousHit" disabled>↑ 前</button><span id="hitPosition" class="muted">該当箇所</span><button type="button" id="nextHit" disabled>次 ↓</button><span class="spacer"></span><button type="button" id="duplicatesButton" hidden>重複</button></div>
+      <div class="preview-body"><div class="preview-meta" id="previewMeta"></div><div class="location" id="previewLocation"></div><div class="content" id="previewContent">検索結果を選ぶと、該当箇所を表示します。</div></div>
+    </article>
+  </main>
+
+  <div class="modal" id="manageModal" role="dialog" aria-modal="true" aria-labelledby="manageTitle" hidden>
+    <section class="modal-card">
+      <div class="modal-head"><div><h2 id="manageTitle">検索の管理</h2><small class="muted" id="manageSub">対象・容量・抽出状態を確認できます</small></div><button type="button" id="modalClose">閉じる</button></div>
+      <div class="modal-tabs" role="tablist"><button data-panel="statePanel" class="active">検索状態</button><button data-panel="storagePanel">容量・除外</button><button data-panel="issuesPanel">要確認</button><button data-panel="settingsPanel">設定</button></div>
+      <div class="modal-body">
+        <section id="statePanel" class="panel active"></section>
+        <section id="storagePanel" class="panel"></section>
+        <section id="issuesPanel" class="panel"></section>
+        <section id="settingsPanel" class="panel"></section>
+      </div>
+    </section>
+  </div>
+  <div class="toast-area" id="toasts" aria-live="polite"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = {results:[], selected:null, selectedIndex:-1, offset:0, hasMore:false, query:'', hits:[], hitIndex:0, status:null, modalFocus:null, modalView:'', warningMode:'', storageParent:''};
+    function applyTheme(theme){document.body.dataset.theme=theme==='system'?'':theme;localStorage.setItem('pcSearchTheme',theme);$('themeButton').textContent=theme==='dark'?'☀':theme==='light'?'◐':'◑';$('themeButton').title=`表示テーマ: ${theme==='dark'?'ダーク':theme==='light'?'ライト':'OSに合わせる'}`;}
+    const escRx = (value) => value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    function formatBytes(value){let n=Number(value||0);for(const unit of ['B','KB','MB','GB','TB']){if(Math.abs(n)<1024||unit==='TB')return `${n.toFixed(unit==='B'?0:2)} ${unit}`;n/=1024;}}
+    function formatDate(ns){if(!ns)return '';return new Date(Number(ns)/1e6).toLocaleDateString('ja-JP');}
+    function toast(message,type=''){const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=message;$('toasts').append(el);setTimeout(()=>el.remove(),5000);}
+    async function api(url,options={}){let response;try{response=await fetch(url,options);}catch(error){throw new Error('アプリに接続できません。起動状態を確認してください。');}let data={};try{data=await response.json();}catch(_error){}if(!response.ok)throw new Error(data.error||data.message||`処理に失敗しました (${response.status})`);return data;}
+    function appendHighlighted(target,text,query){target.textContent='';const words=[...new Set(query.trim().split(/\s+/).filter(Boolean))];if(!words.length){target.textContent=text||'';return;}const rx=new RegExp(`(${words.map(escRx).join('|')})`,'gi');String(text||'').split(rx).forEach(part=>{const node=words.some(word=>part.toLocaleLowerCase().includes(word.toLocaleLowerCase()))?document.createElement('mark'):document.createTextNode(part);if(node.nodeType===1)node.textContent=part;target.append(node);});}
+    function relativePath(path){const roots=state.status?.roots||[];for(const root of roots){if(path.toLocaleLowerCase().startsWith(root.toLocaleLowerCase()))return path.slice(root.length).replace(/^[\\/]+/,'');}return path;}
+    async function loadStatus(){try{const data=await api('/api/status');state.status=data;const issueCount=(data.errors||0)+(data.empty||0)+(data.truncated||0)+(data.too_large||0)+(data.metadata_only||0)+(data.unsupported||0);const indexing=data.indexing||{};const progress=indexing.progress||{};const running=indexing.running;$('indexButton').dataset.action=running?'cancel':'start';$('indexButton').textContent=running?(indexing.cancel_requested?'停止待ち…':'■ 停止'):'索引を更新';$('indexButton').className=running?'danger':'';$('indexButton').disabled=!!indexing.cancel_requested;let statusText;if(running){const phase={scanning:'ファイル確認中',indexing:'本文抽出中',cleanup:'整理中',finalizing:'索引最適化中'}[progress.phase]||'索引更新中';statusText=`${phase}: ${progress.scanned||0}/${progress.total||'?'}・本文更新 ${progress.indexed||0}/${progress.pending_total||'?'}`;}else{statusText=indexing.error?`索引エラー: ${indexing.error}`:`${data.files.toLocaleString()}文書を検索可能`;}const statusEl=$('statusText');statusEl.textContent=statusText;statusEl.className=`status-pill ${running?'busy':indexing.error?'error':''}`;const last=data.last_run?.finished_at?new Date(data.last_run.finished_at).toLocaleString('ja-JP'):'未実行';$('overview').innerHTML='';[[`${data.files.toLocaleString()}文書`],[`DB ${formatBytes(data.database_bytes)}`],[`最終更新 ${last}`],[`要確認 ${issueCount.toLocaleString()}件`]].forEach(([label])=>{const chip=document.createElement('span');chip.className='metric';chip.textContent=label;$('overview').append(chip);});let warning='';state.warningMode='';if(data.other_scope_files){warning='検索対象または除外設定が変わっています。索引を更新してください。';state.warningMode='scope';}else if(data.inventory_mismatch){warning='容量見積の対象が現在の検索対象と異なります。';state.warningMode='inventory';}else if(!data.files){warning='検索対象を確認し、索引を更新してください。';state.warningMode='empty';}else if(issueCount&&localStorage.getItem('pcSearchIssueSeen')!==data.issue_signature){warning=`本文を完全に検索できない文書が ${issueCount}件あります。`;state.warningMode='issues';}$('warningText').textContent=warning;$('warning').classList.toggle('show',!!warning);if(!$('manageModal').hidden&&state.modalView==='statePanel')renderState();}catch(error){$('statusText').textContent=error.message;$('statusText').className='status-pill error';}}
+    function searchParams(offset=0){return new URLSearchParams({q:state.query,mode:$('mode').value,extension:$('extension').value,offset:String(offset),limit:'50',folder:$('folderFilter').value.trim(),date_from:$('dateFrom').value,date_to:$('dateTo').value,statuses:$('statusFilter').value,sort:$('sort').value,content_only:$('contentOnly').checked?'1':'0'});}
+    async function runSearch(event,append=false){if(event)event.preventDefault();state.query=$('query').value.trim();if(!state.query){$('resultList').innerHTML='<div class="empty">検索語を入力してください</div>';$('resultCount').textContent='0件';return;}const offset=append?state.results.length:0;if(!append)$('resultList').innerHTML='<div class="empty">検索中…</div>';const started=performance.now();try{const data=await api(`/api/search?${searchParams(offset)}`);state.results=append?[...state.results,...data.results]:data.results;state.hasMore=data.has_more;state.offset=state.results.length;$('resultCount').textContent=`上位 ${state.results.length}件・${((performance.now()-started)/1000).toFixed(2)}秒`;renderResults(append);}catch(error){if(!append)$('resultList').innerHTML=`<div class="empty">${error.message}</div>`;toast(error.message,'error');}}
+    function renderResults(append){const list=$('resultList');if(!append)list.textContent='';if(!state.results.length){list.innerHTML='<div class="empty">見つかりませんでした。条件を減らしてお試しください。</div>';return;}const start=append?list.querySelectorAll('.result').length:0;for(let index=start;index<state.results.length;index++){const item=state.results[index];const button=document.createElement('button');button.type='button';button.className='result';button.dataset.index=index;button.title='ダブルクリックで元ファイルを開きます';button.setAttribute('aria-label',`${item.filename}、${item.match_kind==='content'?'本文一致':'ファイル名または場所一致'}`);const top=document.createElement('div');top.className='result-top';const name=document.createElement('div');name.className='filename';name.textContent=item.filename;const type=document.createElement('span');type.className='badge';type.textContent=item.extension.replace('.','').toUpperCase();const hit=document.createElement('span');hit.className=`badge ${item.match_kind==='metadata'?'meta':''}`;hit.textContent=item.match_kind==='content'?'本文一致':'名前・場所';top.append(name,hit,type);const path=document.createElement('div');path.className='path';path.textContent=relativePath(item.path);path.title=item.path;const snippet=document.createElement('div');snippet.className='snippet';appendHighlighted(snippet,item.snippet,state.query);const meta=document.createElement('div');meta.className='meta-line';meta.textContent=`${item.location}　${formatBytes(item.size_bytes)}　更新 ${formatDate(item.mtime_ns)}${item.duplicate_count>1?`　同内容 ${item.duplicate_count}か所`:''}`;button.append(top,path,snippet,meta);button.addEventListener('click',()=>selectResult(index,button,true));button.addEventListener('dblclick',()=>fileAction('/api/open-file'));list.append(button);}if(state.hasMore){const more=document.createElement('button');more.type='button';more.className='load-more';more.textContent='さらに50件を表示';more.addEventListener('click',()=>{more.remove();runSearch(null,true);});list.append(more);}if(!append){const first=list.querySelector('.result');if(first)selectResult(0,first,false);}}
+    async function selectResult(index,button,switchMobile){document.querySelectorAll('.result').forEach(node=>{node.classList.remove('selected');node.removeAttribute('aria-current');});button.classList.add('selected');button.setAttribute('aria-current','true');state.selectedIndex=index;state.selected=state.results[index];$('previewName').textContent=state.selected.filename;$('previewPath').textContent=state.selected.path;$('openButton').disabled=false;$('folderButton').disabled=false;$('duplicatesButton').hidden=state.selected.duplicate_count<2;$('duplicatesButton').textContent=`同じ内容 ${state.selected.duplicate_count}か所`;state.hits=[];state.hitIndex=0;try{const data=await api(`/api/file-hits/${state.selected.file_id}?q=${encodeURIComponent(state.query)}&mode=${encodeURIComponent($('mode').value)}`);state.hits=data.hits||[];}catch(error){toast(error.message,'error');}renderPreview();if(switchMobile&&matchMedia('(max-width:900px)').matches)showMobilePreview(true);}
+    function renderPreview(){const item=state.selected;if(!item)return;const hit=state.hits[state.hitIndex];const content=hit?.content||item.content||item.snippet;$('previewLocation').textContent=hit?.location||item.location;appendHighlighted($('previewContent'),content,state.query);$('previewMeta').innerHTML='';[[item.extension.replace('.','').toUpperCase()],[formatBytes(item.size_bytes)],[item.match_kind==='content'?'本文一致':'ファイル名・保存場所一致'],[item.index_status==='ok'?'抽出済み':item.index_status]].forEach(([label])=>{const span=document.createElement('span');span.textContent=label;$('previewMeta').append(span);});$('hitPosition').textContent=state.hits.length?`該当箇所 ${state.hitIndex+1} / ${state.hits.length}`:'本文内の該当箇所なし';$('previousHit').disabled=state.hitIndex<=0;$('nextHit').disabled=state.hitIndex>=state.hits.length-1;}
+    function showMobilePreview(show){$('shell').classList.toggle('show-preview',show);$('previewTab').classList.toggle('active',show);$('resultTab').classList.toggle('active',!show);}
+    async function fileAction(endpoint){if(!state.selected)return;try{await api(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file_id:state.selected.file_id})});}catch(error){toast(error.message,'error');}}
+    function openModal(panel='statePanel'){state.modalFocus=document.activeElement;$('manageModal').hidden=false;switchPanel(panel);$('modalClose').focus();}
+    function closeModal(){$('manageModal').hidden=true;state.modalView='';if(state.modalFocus)state.modalFocus.focus();}
+    function switchPanel(panel){state.modalView=panel;document.querySelectorAll('.panel').forEach(node=>node.classList.toggle('active',node.id===panel));document.querySelectorAll('.modal-tabs button').forEach(node=>node.classList.toggle('active',node.dataset.panel===panel));if(panel==='statePanel')renderState();if(panel==='storagePanel')loadStorage();if(panel==='issuesPanel')loadIssues();if(panel==='settingsPanel')loadSettings();}
+    function addCard(target,label,value){const card=document.createElement('div');card.className='card';const small=document.createElement('small');small.textContent=label;const strong=document.createElement('strong');strong.textContent=value;card.append(small,strong);target.append(card);}
+    function renderState(){const data=state.status;if(!data)return;const issueCount=(data.errors||0)+(data.empty||0)+(data.truncated||0)+(data.too_large||0)+(data.metadata_only||0)+(data.unsupported||0);const panel=$('statePanel');panel.textContent='';const cards=document.createElement('div');cards.className='cards';addCard(cards,'検索可能',`${data.files.toLocaleString()}文書`);addCard(cards,'検索DB',formatBytes(data.database_bytes));addCard(cards,'要確認',`${issueCount}件`);panel.append(cards);const details=document.createElement('div');details.className='data-list';const entries=[['検索対象',data.roots.join(' / ')],['最終実行',data.last_run?.finished_at?new Date(data.last_run.finished_at).toLocaleString('ja-JP'):'未実行'],['設定ファイル',data.config_path],['検索DB',data.database_path],['アプリ版',data.version]];if(data.indexing?.running&&data.indexing.progress?.current_path)entries.splice(2,0,['現在処理中',data.indexing.progress.current_path]);entries.forEach(([name,value])=>{const row=document.createElement('div');row.className='data-row';const strong=document.createElement('strong');strong.textContent=name;const path=document.createElement('div');path.className='row-path';path.textContent=value;path.title=value;row.append(strong,path);details.append(row);});panel.append(details);const controls=document.createElement('div');controls.className='section-title';const estimate=document.createElement('button');estimate.type='button';estimate.textContent=data.inventory_running?'容量を見積中…':'容量を再見積';estimate.disabled=!!data.inventory_running;estimate.addEventListener('click',async()=>{try{await api('/api/inventory',{method:'POST'});toast('容量見積を開始しました。');loadStatus();}catch(error){toast(error.message,'error');}});controls.append(document.createElement('span'),estimate);panel.append(controls);}
+    async function loadStorage(parent=state.storageParent){const panel=$('storagePanel');panel.innerHTML='<div class="empty">容量を集計中…</div>';try{const data=await api(`/api/storage?limit=20&parent=${encodeURIComponent(parent||'')}`);state.storageParent=data.parent||'';panel.textContent='';const cards=document.createElement('div');cards.className='cards';addCard(cards,'DB全体',formatBytes(data.database_bytes));addCard(cards,'抽出本文',formatBytes(data.content_bytes));addCard(cards,'索引・管理情報（概算）',formatBytes(data.index_overhead_bytes));panel.append(cards);const nav=document.createElement('div');nav.className='section-title';const title=document.createElement('h3');title.textContent=state.storageParent?`フォルダ: ${state.storageParent}`:'容量の大きいフォルダ';const reset=document.createElement('button');reset.type='button';reset.textContent='最上位へ';reset.disabled=!state.storageParent;reset.addEventListener('click',()=>{state.storageParent='';loadStorage('');});nav.append(title,reset);panel.append(nav,consumerList(data.top_folders||[],'folder'));const fileTitle=document.createElement('div');fileTitle.className='section-title';fileTitle.innerHTML='<h3>容量の大きいファイル</h3>';panel.append(fileTitle,consumerList(data.top_files||[],'file'));const suggestTitle=document.createElement('div');suggestTitle.className='section-title';suggestTitle.innerHTML='<h3>自動検出した除外候補</h3>';panel.append(suggestTitle);const suggestions=await api('/api/exclusion-suggestions');panel.append(consumerList(suggestions.items||[],'suggestion'));}catch(error){panel.innerHTML=`<div class="empty">${error.message}</div>`;}}
+    function consumerList(items,kind){const list=document.createElement('div');list.className='data-list';if(!items.length){list.innerHTML='<div class="empty">該当項目はありません</div>';return list;}items.forEach(item=>{const row=document.createElement('div');row.className='data-row';const name=document.createElement('strong');name.textContent=item.name||item.path.split(/[\\/]/).pop();const path=document.createElement('div');path.className='row-path';path.textContent=item.path;path.title=item.path;const meta=document.createElement('div');meta.className='row-meta';meta.textContent=`${item.files||1}文書・本文 ${formatBytes(item.content_bytes)}・原本 ${formatBytes(item.source_bytes)}${item.reason?`・${item.reason}`:''}`;const actions=document.createElement('div');actions.className='row-actions';if(kind==='folder'){const drill=document.createElement('button');drill.textContent='開く';drill.addEventListener('click',()=>loadStorage(item.path));const filter=document.createElement('button');filter.textContent='ここを検索';filter.addEventListener('click',()=>{$('folderFilter').value=item.path;$('advanced').classList.add('open');closeModal();toast('場所フィルターに設定しました');});actions.append(drill,filter);}if(kind==='file'){const select=document.createElement('select');[['default','既定'],['full','全文'],['head','先頭行'],['metadata','名前のみ'],['exclude','除外']].forEach(([value,label])=>select.add(new Option(label,value)));select.addEventListener('change',async()=>{if(select.value==='default')return;await savePolicy(item.path,select.value);});actions.append(select);}if(kind==='folder'||kind==='suggestion'){const exclude=document.createElement('button');exclude.textContent='除外候補';exclude.addEventListener('click',()=>confirmExclusion(item.path));actions.append(exclude);}row.append(name,path,meta,actions);list.append(row);});return list;}
+    async function confirmExclusion(path){try{const impact=await api(`/api/path-impact?path=${encodeURIComponent(path)}`);if(!confirm(`${path}\n\n${impact.files}文書、抽出本文 ${formatBytes(impact.content_bytes)} が次回索引から除外されます。設定後に差分更新が必要です。続けますか？`))return;await api('/api/exclusions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path,kind:'folder',action:'add'})});toast('除外設定へ追加しました。差分更新を実行してください。');await loadStatus();loadStorage();}catch(error){toast(error.message,'error');}}
+    async function savePolicy(path,policy){try{await api('/api/file-policy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path,policy})});toast('ファイルの処理方法を保存しました。差分更新を実行してください。');await loadStatus();}catch(error){toast(error.message,'error');}}
+    async function loadIssues(){const panel=$('issuesPanel');panel.innerHTML='<div class="empty">要確認文書を読込中…</div>';try{const data=await api('/api/issues?limit=500');panel.textContent='';const heading=document.createElement('div');heading.className='section-title';heading.innerHTML='<h3>本文を完全に検索できない文書</h3>';panel.append(heading);const list=document.createElement('div');list.className='data-list';if(!data.items.length)list.innerHTML='<div class="empty">要確認文書はありません</div>';data.items.forEach(item=>{const row=document.createElement('div');row.className='data-row';const name=document.createElement('strong');name.textContent=item.filename;const path=document.createElement('div');path.className='row-path';path.textContent=item.path;const meta=document.createElement('div');meta.className='row-meta';meta.textContent=`${item.index_status}・${item.error||'詳細なし'}・${formatBytes(item.size_bytes)}`;const actions=document.createElement('div');actions.className='row-actions';if(['.csv','.xls','.xlsx'].includes(item.extension)){const select=document.createElement('select');[['default','処理方法'],['full','全文'],['head','先頭行'],['metadata','名前のみ'],['exclude','除外']].forEach(([value,label])=>select.add(new Option(label,value)));select.addEventListener('change',()=>savePolicy(item.path,select.value));actions.append(select);}const exclude=document.createElement('button');exclude.textContent='除外';exclude.addEventListener('click',()=>confirmExclusion(item.path));actions.append(exclude);row.append(name,path,meta,actions);list.append(row);});panel.append(list);}catch(error){panel.innerHTML=`<div class="empty">${error.message}</div>`;}}
+    async function loadSettings(){const panel=$('settingsPanel');panel.innerHTML='<div class="empty">設定を読込中…</div>';try{const data=await api('/api/settings');panel.textContent='';const grid=document.createElement('div');grid.className='settings-grid';grid.innerHTML=`<label class="field wide">検索対象フォルダ（1行に1つ）<textarea id="settingsRoots"></textarea></label><label class="field wide">常に除外するフォルダ（1行に1つ）<textarea id="settingsExcludes"></textarea></label><label class="field">巨大な表を先頭行だけにする場合の行数<input id="settingsRows" type="number" min="1"></label><label class="field">1文書の最大抽出文字数<input id="settingsChars" type="number" min="1000"></label><label class="field">最大ファイルサイズ（MB）<input id="settingsSize" type="number" min="1"></label><label class="field">索引並列数（1～8）<input id="settingsWorkers" type="number" min="1" max="8"></label><label class="field">自動差分更新（分、0で無効）<input id="settingsInterval" type="number" min="0"></label>`;panel.append(grid);$('settingsRoots').value=data.roots.join('\n');$('settingsExcludes').value=data.exclude_folder_paths.join('\n');$('settingsRows').value=data.table_head_rows;$('settingsChars').value=data.max_text_chars_per_file;$('settingsSize').value=data.max_file_size_mb;$('settingsWorkers').value=data.index_workers;$('settingsInterval').value=data.auto_index_interval_minutes;const save=document.createElement('button');save.type='button';save.className='primary';save.style.marginTop='14px';save.textContent='設定を保存';save.addEventListener('click',saveSettings);panel.append(save);const note=document.createElement('p');note.className='muted';note.textContent=`設定: ${data.config_path}　DB: ${data.database_path}。既存DBはそのまま使い、対象変更後は新旧結果を混在させません。自動更新はアプリ起動中に動作します。`;panel.append(note);}catch(error){panel.innerHTML=`<div class="empty">${error.message}</div>`;}}
+    async function saveSettings(){const payload={roots:$('settingsRoots').value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean),exclude_folder_paths:$('settingsExcludes').value.split(/\r?\n/).map(v=>v.trim()).filter(Boolean),table_head_rows:Number($('settingsRows').value),max_text_chars_per_file:Number($('settingsChars').value),max_file_size_mb:Number($('settingsSize').value),index_workers:Number($('settingsWorkers').value),auto_index_interval_minutes:Number($('settingsInterval').value)};try{const data=await api('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});toast(data.scope_changed?'設定を保存しました。差分更新を実行してください。':'設定を保存しました。');await loadStatus();}catch(error){toast(error.message,'error');}}
+    async function showDuplicates(){if(!state.selected)return;try{const data=await api(`/api/duplicates/${state.selected.file_id}`);openModal('statePanel');state.modalView='duplicates';const panel=$('statePanel');panel.textContent='';const title=document.createElement('div');title.className='section-title';title.innerHTML='<h3>同じ本文のファイル</h3>';panel.append(title);const list=document.createElement('div');list.className='data-list';data.files.forEach(item=>{const row=document.createElement('div');row.className='data-row';const name=document.createElement('strong');name.textContent=item.filename;const path=document.createElement('div');path.className='row-path';path.textContent=item.path;row.append(name,path);list.append(row);});panel.append(list);}catch(error){toast(error.message,'error');}}
+    $('searchForm').addEventListener('submit',runSearch);$('advancedToggle').addEventListener('click',()=>$('advanced').classList.toggle('open'));$('extension').addEventListener('change',()=>state.query&&runSearch());$('mode').addEventListener('change',()=>state.query&&runSearch());
+    $('indexButton').addEventListener('click',async()=>{const cancelling=$('indexButton').dataset.action==='cancel';$('indexButton').disabled=true;try{await api(cancelling?'/api/index/cancel':'/api/index',{method:'POST'});toast(cancelling?'安全に停止しています。現在処理中の文書が終わるまでお待ちください。':'差分更新を開始しました。検索はそのまま利用できます。');}catch(error){toast(error.message,'error');}$('indexButton').disabled=false;loadStatus();});
+    $('openButton').addEventListener('click',()=>fileAction('/api/open-file'));$('folderButton').addEventListener('click',()=>fileAction('/api/show-in-folder'));$('previousHit').addEventListener('click',()=>{if(state.hitIndex>0){state.hitIndex--;renderPreview();}});$('nextHit').addEventListener('click',()=>{if(state.hitIndex<state.hits.length-1){state.hitIndex++;renderPreview();}});$('duplicatesButton').addEventListener('click',showDuplicates);
+    $('manageButton').addEventListener('click',()=>openModal());$('warningAction').addEventListener('click',()=>{const data=state.status||{};if(state.warningMode==='issues'&&data.issue_signature){localStorage.setItem('pcSearchIssueSeen',data.issue_signature);$('warning').classList.remove('show');}openModal(!data.files?'settingsPanel':(data.inventory_mismatch||data.other_scope_files)?'statePanel':'issuesPanel');});$('modalClose').addEventListener('click',closeModal);$('manageModal').addEventListener('click',event=>{if(event.target===$('manageModal'))closeModal();});document.querySelectorAll('.modal-tabs button').forEach(button=>button.addEventListener('click',()=>switchPanel(button.dataset.panel)));
+    $('themeButton').addEventListener('click',()=>{const current=localStorage.getItem('pcSearchTheme')||'system';applyTheme(current==='system'?'light':current==='light'?'dark':'system');});
+    $('resultTab').addEventListener('click',()=>showMobilePreview(false));$('previewTab').addEventListener('click',()=>showMobilePreview(true));
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('manageModal').hidden){closeModal();return;}if(event.key==='/'&&document.activeElement!==$('query')){event.preventDefault();$('query').focus();return;}if(!$('manageModal').hidden&&event.key==='Tab'){const focusable=[...$('manageModal').querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)')];if(!focusable.length)return;const first=focusable[0],last=focusable[focusable.length-1];if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}return;}const active=document.activeElement;if(!active?.classList?.contains('result')||!['ArrowDown','ArrowUp'].includes(event.key))return;event.preventDefault();const delta=event.key==='ArrowDown'?1:-1;const next=Math.max(0,Math.min(state.results.length-1,state.selectedIndex+delta));const button=document.querySelector(`.result[data-index="${next}"]`);if(button){selectResult(next,button,false);button.focus();button.scrollIntoView({block:'nearest'});}});
+    applyTheme(localStorage.getItem('pcSearchTheme')||'system');loadStatus();setInterval(loadStatus,2000);
+  </script>
+</body>
+</html>
