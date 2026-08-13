@@ -28,7 +28,7 @@ from .indexer import run_index
 from .inventory import build_inventory
 
 
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.5.0"
 
 
 def _date_ns(value: str, *, end: bool = False) -> int:

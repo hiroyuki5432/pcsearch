@@ -180,7 +180,7 @@ def initialize(config: SearchConfig) -> None:
 
 
 def _serialize_result(
-    row: sqlite3.Row, query_tokens: list[str], match_kind: str = "content"
+    row: sqlite3.Row | dict[str, Any], query_tokens: list[str], match_kind: str = "content"
 ) -> dict[str, Any]:
     content = row["content"] or ""
     return {
@@ -280,7 +280,7 @@ def search_page(
         "size_desc": "size_bytes DESC, score",
     }.get(sort, "score")
 
-    sql = f"""
+    legacy_sql = f"""
         WITH raw_matches AS (
             SELECT
                 f.id AS file_id,
@@ -333,20 +333,148 @@ def search_page(
     """
     fetch_count = offset + limit + 1
 
-    def execute(match_expression: str) -> list[sqlite3.Row]:
+    def execute_legacy(match_expression: str) -> list[sqlite3.Row]:
         params = [match_expression, *condition_params, config.scope_hash, fetch_count]
-        return connection.execute(sql, params).fetchall()
+        return connection.execute(legacy_sql, params).fetchall()
+
+    def execute_relevance(
+        match_expression: str,
+        connection: sqlite3.Connection,
+    ) -> list[dict[str, Any]]:
+        """Return the best unique files without ranking every matching chunk.
+
+        FTS5 can stop its rank-ordered scan after LIMIT. The previous window
+        functions forced SQLite to rank and sort every match before applying the
+        result limit, which made common terms disproportionately slow.
+        """
+        candidate_limit = min(50_000, max(1_000, fetch_count * 20))
+        summaries: list[sqlite3.Row] = []
+        while True:
+            candidate_sql = f"""
+                SELECT
+                    f.id AS file_id,
+                    c.id AS chunk_id,
+                    f.content_hash,
+                    rank AS score
+                FROM chunks_fts
+                JOIN chunks c ON c.id = chunks_fts.rowid
+                JOIN files f ON f.id = c.file_id
+                WHERE chunks_fts MATCH ?
+                  AND rank MATCH 'bm25(1.0, 5.0, 2.0)'
+                  AND {where}
+                ORDER BY rank
+                LIMIT ?
+            """
+            rows = connection.execute(
+                candidate_sql,
+                [match_expression, *condition_params, candidate_limit],
+            ).fetchall()
+            seen_files: set[int] = set()
+            seen_hashes: set[str] = set()
+            summaries = []
+            for row in rows:
+                if row["file_id"] in seen_files:
+                    continue
+                content_hash = row["content_hash"] or ""
+                if content_hash and content_hash in seen_hashes:
+                    continue
+                seen_files.add(row["file_id"])
+                if content_hash:
+                    seen_hashes.add(content_hash)
+                summaries.append(row)
+                if len(summaries) >= fetch_count:
+                    break
+            if (
+                len(summaries) >= fetch_count
+                or len(rows) < candidate_limit
+                or candidate_limit >= 50_000
+            ):
+                break
+            candidate_limit = min(50_000, candidate_limit * 4)
+
+        if not summaries:
+            return []
+        chunk_ids = [row["chunk_id"] for row in summaries]
+        placeholders = ",".join("?" for _ in chunk_ids)
+        details = connection.execute(
+            f"""
+            SELECT
+                f.id AS file_id,
+                c.id AS chunk_id,
+                f.filename,
+                f.path,
+                f.extension,
+                f.size_bytes,
+                f.mtime_ns,
+                c.location,
+                c.content,
+                f.index_status,
+                f.indexed_at,
+                f.content_hash
+            FROM chunks c
+            JOIN files f ON f.id=c.file_id
+            WHERE c.id IN ({placeholders})
+            """,
+            chunk_ids,
+        ).fetchall()
+        detail_by_chunk = {row["chunk_id"]: dict(row) for row in details}
+
+        hashes = sorted({row["content_hash"] for row in summaries if row["content_hash"]})
+        duplicate_counts: dict[str, int] = {}
+        if hashes:
+            hash_placeholders = ",".join("?" for _ in hashes)
+            duplicate_counts = {
+                row["content_hash"]: row["duplicate_count"]
+                for row in connection.execute(
+                    f"""
+                    SELECT content_hash, COUNT(*) AS duplicate_count
+                    FROM files
+                    WHERE is_deleted=0 AND scope_hash=?
+                      AND content_hash IN ({hash_placeholders})
+                    GROUP BY content_hash
+                    """,
+                    [config.scope_hash, *hashes],
+                )
+            }
+
+        hydrated: list[dict[str, Any]] = []
+        for summary in summaries:
+            item = detail_by_chunk.get(summary["chunk_id"])
+            if item is None:
+                continue
+            item["score"] = summary["score"]
+            item["hit_count"] = 1
+            item["duplicate_count"] = duplicate_counts.get(item["content_hash"], 1)
+            hydrated.append(item)
+        return hydrated
 
     with closing(connect(config, readonly=True)) as connection:
         content_match = f"content_terms : ({match})"
-        content_rows = execute(content_match)
-        combined: list[tuple[sqlite3.Row, str]] = [(row, "content") for row in content_rows]
+        if sort == "relevance":
+            content_rows = execute_relevance(content_match, connection)
+        else:
+            content_rows = execute_legacy(content_match)
+        combined: list[tuple[sqlite3.Row | dict[str, Any], str]] = [
+            (row, "content") for row in content_rows
+        ]
         seen = {row["file_id"] for row in content_rows}
         if not content_only and len(combined) < fetch_count:
-            for row in execute(match):
+            metadata_match = f"{{filename_terms path_terms}} : ({match})"
+            metadata_rows = (
+                execute_relevance(metadata_match, connection)
+                if sort == "relevance"
+                else execute_legacy(match)
+            )
+            seen_hashes = {row["content_hash"] for row in content_rows if row["content_hash"]}
+            for row in metadata_rows:
                 if row["file_id"] not in seen:
+                    content_hash = row["content_hash"] or ""
+                    if content_hash and content_hash in seen_hashes:
+                        continue
                     combined.append((row, "metadata"))
                     seen.add(row["file_id"])
+                    if content_hash:
+                        seen_hashes.add(content_hash)
                     if len(combined) >= fetch_count:
                         break
 
