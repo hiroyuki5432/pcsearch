@@ -235,7 +235,7 @@ def run_index(
                 existing_rows = connection.execute(
                     """
                     SELECT id, path, size_bytes, mtime_ns, extractor_version, is_deleted,
-                           scope_hash, extraction_hash
+                           index_status, scope_hash, extraction_hash
                     FROM files WHERE is_deleted=0
                     """
                 ).fetchall()
@@ -263,6 +263,10 @@ def run_index(
                         and existing["extractor_version"] == EXTRACTOR_VERSION
                         and existing["is_deleted"] == 0
                         and existing["extraction_hash"] == extraction_hash
+                        and not (
+                            candidate.extension in {".doc", ".ppt"}
+                            and existing["index_status"] == "unsupported"
+                        )
                     ):
                         if existing["scope_hash"] != config.scope_hash:
                             connection.execute(
