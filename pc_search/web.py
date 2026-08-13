@@ -28,7 +28,7 @@ from .indexer import run_index
 from .inventory import build_inventory
 
 
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.4.0"
 
 
 def _date_ns(value: str, *, end: bool = False) -> int:
@@ -146,8 +146,8 @@ def create_app(config: SearchConfig) -> Flask:
         extension = request.args.get("extension", "")
         extension = {
             "excel": "xlsx,xls",
-            "word": "docx",
-            "powerpoint": "pptx",
+            "word": "docx,doc",
+            "powerpoint": "pptx,ppt",
         }.get(extension, extension)
         statuses = tuple(filter(None, request.args.get("statuses", "").split(",")))
         page = search_page(
@@ -318,12 +318,13 @@ def create_app(config: SearchConfig) -> Flask:
         ).start()
         return jsonify({"started": True})
 
-    def background_index(active: SearchConfig) -> None:
+    def background_index(active: SearchConfig, mode: str = "scan") -> None:
         try:
             stats = run_index(
                 active,
                 progress=lambda value: index_state.update({"progress": value}),
                 should_cancel=cancel_event.is_set,
+                mode=mode,
             )
             index_state["progress"] = stats.as_dict()
         except Exception as exc:
@@ -356,7 +357,7 @@ def create_app(config: SearchConfig) -> Flask:
             )
             threading.Thread(
                 target=background_index,
-                args=(active,),
+                args=(active, "scan"),
                 name="pc-search-auto-index",
                 daemon=True,
             ).start()
@@ -367,17 +368,23 @@ def create_app(config: SearchConfig) -> Flask:
 
     @app.post("/api/index")
     def api_index():
+        requested = request.get_json(silent=True) or {}
+        mode = str(requested.get("mode", "scan"))
+        if mode not in {"scan", "resume"}:
+            raise ValueError("更新方式が不正です")
+        active = current_config()
+        if mode == "resume" and status(active)["resume_pending"] == 0:
+            return jsonify({"started": False, "message": "再開できる処理はありません"}), 409
         if not index_lock.acquire(blocking=False):
             return jsonify({"started": False, "message": "索引更新は実行中です"}), 409
         cancel_event.clear()
         index_state.update(
             {"running": True, "cancel_requested": False, "error": "", "progress": {}}
         )
-        active = current_config()
         threading.Thread(
-            target=background_index, args=(active,), name="pc-search-indexer", daemon=True
+            target=background_index, args=(active, mode), name="pc-search-indexer", daemon=True
         ).start()
-        return jsonify({"started": True})
+        return jsonify({"started": True, "mode": mode})
 
     @app.post("/api/index/cancel")
     def api_index_cancel():

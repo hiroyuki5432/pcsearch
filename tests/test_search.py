@@ -157,6 +157,41 @@ class SearchTests(unittest.TestCase):
             self.assertTrue(cancelled.cancelled)
             self.assertEqual(status(config)["last_run"]["status"], "cancelled")
 
+    def test_resume_uses_persisted_queue_without_full_rescan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = make_config(Path(directory))
+            for index in range(3):
+                (config.roots[0] / f"再開{index}.txt").write_text(
+                    f"再開対象の本文 {index}", encoding="utf-8"
+                )
+
+            cancel = {"requested": False}
+
+            def stop_during_scan(value):
+                if value["phase"] == "scanning" and value["scanned"] == 1:
+                    cancel["requested"] = True
+
+            interrupted = run_index(
+                config,
+                progress=stop_during_scan,
+                should_cancel=lambda: cancel["requested"],
+            )
+            self.assertTrue(interrupted.cancelled)
+            self.assertEqual(status(config)["resume_pending"], 1)
+
+            # This file was created after the interrupted scan, so resume must not
+            # discover it. A later complete scan will pick it up.
+            (config.roots[0] / "走査後.txt").write_text("後から追加", encoding="utf-8")
+            resumed = run_index(config, mode="resume")
+            self.assertEqual(resumed.indexed, 1)
+            self.assertEqual(resumed.scanned, 1)
+            self.assertEqual(status(config)["resume_pending"], 0)
+            self.assertFalse(search(config, "後から追加"))
+
+            complete = run_index(config)
+            self.assertEqual(complete.indexed, 3)
+            self.assertTrue(search(config, "後から追加"))
+
     def test_content_ranking_duplicates_filters_and_management_api(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = make_config(Path(directory))

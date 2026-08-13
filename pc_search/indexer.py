@@ -35,6 +35,7 @@ class IndexStats:
     phase: str = "scanning"
     cancelled: bool = False
     current_path: str = ""
+    mode: str = "scan"
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, int | str | bool]:
@@ -50,13 +51,16 @@ class IndexStats:
             "phase": self.phase,
             "cancelled": self.cancelled,
             "current_path": self.current_path,
+            "mode": self.mode,
         }
 
 
 _EXTENSION_PRIORITY = {
     ".txt": 0,
     ".docx": 0,
+    ".doc": 0,
     ".pptx": 0,
+    ".ppt": 0,
     ".pdf": 1,
     ".xls": 2,
     ".xlsx": 3,
@@ -181,9 +185,12 @@ def run_index(
     limit: int | None = None,
     progress: ProgressCallback | None = None,
     should_cancel: CancelCheck | None = None,
+    mode: str = "scan",
 ) -> IndexStats:
+    if mode not in {"scan", "resume"}:
+        raise ValueError("mode must be 'scan' or 'resume'")
     initialize(config)
-    stats = IndexStats()
+    stats = IndexStats(mode=mode, phase="resuming" if mode == "resume" else "scanning")
     seen_paths: set[str] = set()
 
     def cancellation_point() -> None:
@@ -217,54 +224,142 @@ def run_index(
         connection.commit()
 
         try:
-            candidates = sorted(iter_candidate_files(config), key=_candidate_priority)
-            if limit is not None:
-                candidates = candidates[: max(0, limit)]
-            stats.total = len(candidates)
             pending: list[CandidateFile] = []
-            existing_rows = connection.execute(
-                """
-                SELECT id, path, size_bytes, mtime_ns, extractor_version, is_deleted,
-                       scope_hash, extraction_hash
-                FROM files WHERE is_deleted=0
-                """
-            ).fetchall()
-            existing_by_path = {
-                os.path.normcase(os.path.normpath(row["path"])): row
-                for row in existing_rows
-            }
+            if mode == "scan":
+                # Keep the current scope's prior queue until this replacement scan
+                # completes. A second crash must not discard resumable work.
+                connection.execute(
+                    "DELETE FROM index_queue WHERE scope_hash<>?", (config.scope_hash,)
+                )
+                connection.commit()
+                existing_rows = connection.execute(
+                    """
+                    SELECT id, path, size_bytes, mtime_ns, extractor_version, is_deleted,
+                           index_status, scope_hash, extraction_hash
+                    FROM files WHERE is_deleted=0
+                    """
+                ).fetchall()
+                existing_by_path = {
+                    os.path.normcase(os.path.normpath(row["path"])): row
+                    for row in existing_rows
+                }
 
-            # Fast metadata pass. Unchanged files never enter extraction workers.
-            for candidate in candidates:
-                cancellation_point()
-                normalized_path = os.path.normcase(os.path.normpath(str(candidate.path)))
-                seen_paths.add(normalized_path)
-                stats.scanned += 1
-                stats.current_path = str(candidate.path)
-                existing = existing_by_path.get(normalized_path)
-                if (
-                    existing
-                    and existing["size_bytes"] == candidate.size
-                    and existing["mtime_ns"] == candidate.mtime_ns
-                    and existing["extractor_version"] == EXTRACTOR_VERSION
-                    and existing["is_deleted"] == 0
-                    and existing["extraction_hash"] == config.extraction_hash(candidate.path)
-                ):
-                    if existing["scope_hash"] != config.scope_hash:
-                        connection.execute(
-                            "UPDATE files SET scope_hash=? WHERE id=?",
-                            (config.scope_hash, existing["id"]),
+                # This pass only reads directory entries and file metadata. Excluded
+                # cloud placeholders are filtered before any file content is opened.
+                for candidate in iter_candidate_files(config):
+                    cancellation_point()
+                    if limit is not None and stats.scanned >= max(0, limit):
+                        break
+                    normalized_path = os.path.normcase(os.path.normpath(str(candidate.path)))
+                    seen_paths.add(normalized_path)
+                    stats.scanned += 1
+                    stats.current_path = str(candidate.path)
+                    existing = existing_by_path.get(normalized_path)
+                    extraction_hash = config.extraction_hash(candidate.path)
+                    if (
+                        existing
+                        and existing["size_bytes"] == candidate.size
+                        and existing["mtime_ns"] == candidate.mtime_ns
+                        and existing["extractor_version"] == EXTRACTOR_VERSION
+                        and existing["is_deleted"] == 0
+                        and existing["extraction_hash"] == extraction_hash
+                        and not (
+                            candidate.extension in {".doc", ".ppt"}
+                            and existing["index_status"] == "unsupported"
                         )
-                    stats.unchanged += 1
-                else:
-                    pending.append(candidate)
-                if stats.scanned == 1 or stats.scanned % 100 == 0:
-                    report()
-                    connection.execute(
-                        "UPDATE index_runs SET scanned=?, unchanged=?, message=? WHERE id=?",
-                        (stats.scanned, stats.unchanged, f"確認中: {stats.current_path}", run_id),
+                    ):
+                        if existing["scope_hash"] != config.scope_hash:
+                            connection.execute(
+                                "UPDATE files SET scope_hash=? WHERE id=?",
+                                (config.scope_hash, existing["id"]),
+                            )
+                        connection.execute(
+                            "DELETE FROM index_queue WHERE path=?", (str(candidate.path),)
+                        )
+                        stats.unchanged += 1
+                    else:
+                        pending.append(candidate)
+                        connection.execute(
+                            """
+                            INSERT INTO index_queue(
+                                path, root_path, extension, size_bytes, mtime_ns,
+                                extraction_hash, scope_hash, queued_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(path) DO UPDATE SET
+                                root_path=excluded.root_path,
+                                extension=excluded.extension,
+                                size_bytes=excluded.size_bytes,
+                                mtime_ns=excluded.mtime_ns,
+                                extraction_hash=excluded.extraction_hash,
+                                scope_hash=excluded.scope_hash,
+                                queued_at=excluded.queued_at
+                            """,
+                            (
+                                str(candidate.path), str(candidate.root), candidate.extension,
+                                candidate.size, candidate.mtime_ns, extraction_hash,
+                                config.scope_hash, utc_now(),
+                            ),
+                        )
+                    if stats.scanned == 1 or stats.scanned % 50 == 0:
+                        report()
+                        connection.execute(
+                            "UPDATE index_runs SET scanned=?, unchanged=?, message=? WHERE id=?",
+                            (stats.scanned, stats.unchanged, f"確認中: {stats.current_path}", run_id),
+                        )
+                        connection.commit()
+                stats.total = stats.scanned
+                pending.sort(key=_candidate_priority)
+            else:
+                queue_rows = connection.execute(
+                    """
+                    SELECT path, root_path, extension, size_bytes, mtime_ns
+                    FROM index_queue WHERE scope_hash=? ORDER BY queued_at, path
+                    """,
+                    (config.scope_hash,),
+                ).fetchall()
+                stats.total = len(queue_rows)
+                for row in queue_rows:
+                    cancellation_point()
+                    path = Path(row["path"])
+                    stats.scanned += 1
+                    stats.current_path = str(path)
+                    try:
+                        file_stat = path.stat()
+                    except (FileNotFoundError, PermissionError, OSError):
+                        with connection:
+                            connection.execute("DELETE FROM index_queue WHERE path=?", (str(path),))
+                            old = connection.execute(
+                                "SELECT id FROM files WHERE path=? AND is_deleted=0", (str(path),)
+                            ).fetchone()
+                            if old:
+                                _delete_chunks(connection, old["id"])
+                                connection.execute(
+                                    "UPDATE files SET is_deleted=1, indexed_at=? WHERE id=?",
+                                    (utc_now(), old["id"]),
+                                )
+                                stats.deleted += 1
+                        continue
+                    candidate = CandidateFile(
+                        path=path,
+                        root=Path(row["root_path"]),
+                        extension=path.suffix.lower(),
+                        size=file_stat.st_size,
+                        mtime_ns=file_stat.st_mtime_ns,
                     )
-                    connection.commit()
+                    pending.append(candidate)
+                    connection.execute(
+                        """
+                        UPDATE index_queue SET extension=?, size_bytes=?, mtime_ns=?,
+                            extraction_hash=?, queued_at=? WHERE path=?
+                        """,
+                        (
+                            candidate.extension, candidate.size, candidate.mtime_ns,
+                            config.extraction_hash(path), utc_now(), str(path),
+                        ),
+                    )
+                    if stats.scanned == 1 or stats.scanned % 100 == 0:
+                        report()
+                        connection.commit()
 
             stats.phase = "indexing"
             stats.pending_total = len(pending)
@@ -281,6 +376,7 @@ def run_index(
                 stats.current_path = str(candidate.path)
                 with connection:
                     _write_file(connection, candidate, prepared, config, should_cancel)
+                    connection.execute("DELETE FROM index_queue WHERE path=?", (str(candidate.path),))
                 stats.indexed += 1
                 result = prepared.result
                 if result.status == "error":
@@ -354,7 +450,7 @@ def run_index(
                         raise
 
             cancellation_point()
-            if limit is None:
+            if mode == "scan" and limit is None:
                 stats.phase = "cleanup"
                 report()
                 active_rows = connection.execute(
@@ -373,6 +469,12 @@ def run_index(
                             (utc_now(), row["id"]),
                         )
                     stats.deleted += 1
+
+                # Any rows left at this point referred to files that disappeared or
+                # became excluded. The successful complete scan has superseded them.
+                connection.execute(
+                    "DELETE FROM index_queue WHERE scope_hash=?", (config.scope_hash,)
+                )
 
                 # A completed generation replaces older target/exclusion generations.
                 stale_rows = connection.execute(
