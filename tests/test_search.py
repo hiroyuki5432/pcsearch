@@ -262,6 +262,33 @@ class SearchTests(unittest.TestCase):
             policy_run = run_index(policy_config)
             self.assertEqual(policy_run.indexed, 1)
 
+    def test_broad_relevance_search_pages_without_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = make_config(Path(directory))
+            root = config.roots[0]
+            for index in range(125):
+                (root / f"共通語{index:03}.txt").write_text(
+                    f"高速検索の共通語を含む文書 {index}", encoding="utf-8"
+                )
+            run_index(config)
+
+            first = search_page(config, "高速検索 共通語", limit=50)
+            second = search_page(config, "高速検索 共通語", limit=50, offset=50)
+            third = search_page(config, "高速検索 共通語", limit=50, offset=100)
+
+            self.assertEqual(len(first["results"]), 50)
+            self.assertEqual(len(second["results"]), 50)
+            self.assertEqual(len(third["results"]), 25)
+            self.assertTrue(first["has_more"])
+            self.assertTrue(second["has_more"])
+            self.assertFalse(third["has_more"])
+            ids = {
+                item["file_id"]
+                for page in (first, second, third)
+                for item in page["results"]
+            }
+            self.assertEqual(len(ids), 125)
+
 
 if __name__ == "__main__":
     unittest.main()
