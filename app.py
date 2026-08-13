@@ -47,6 +47,11 @@ def make_parser() -> argparse.ArgumentParser:
 
     index_parser = subparsers.add_parser("index", help="差分索引を作成する")
     index_parser.add_argument("--limit", type=int)
+    index_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="前回の走査で記録済みの未処理ファイルだけを処理する",
+    )
 
     search_parser = subparsers.add_parser("search", help="コマンドラインで検索する")
     search_parser.add_argument("query")
@@ -101,7 +106,12 @@ def main() -> None:
                 flush=True,
             )
 
-        stats = run_index(config, limit=args.limit, progress=progress)
+        stats = run_index(
+            config,
+            limit=args.limit,
+            progress=progress,
+            mode="resume" if args.resume else "scan",
+        )
         print()
         print(json.dumps(stats.as_dict(), ensure_ascii=False, indent=2))
         print(f"DB: {config.database_path} ({human_bytes(config.database_path.stat().st_size)})")

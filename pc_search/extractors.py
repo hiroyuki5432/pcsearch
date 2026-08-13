@@ -171,6 +171,52 @@ def _extract_docx(path: Path, config: SearchConfig) -> Iterable[TextChunk]:
     )
 
 
+def _extract_doc(path: Path, config: SearchConfig) -> Iterable[TextChunk]:
+    """Extract legacy .doc text through the locally installed Microsoft Word."""
+    import pythoncom
+    import win32com.client
+
+    application = None
+    document = None
+    pythoncom.CoInitialize()
+    try:
+        application = win32com.client.DispatchEx("Word.Application")
+        application.Visible = False
+        application.DisplayAlerts = 0
+        try:
+            application.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+        except Exception:
+            pass
+        document = application.Documents.Open(
+            FileName=str(path),
+            ConfirmConversions=False,
+            ReadOnly=True,
+            AddToRecentFiles=False,
+            Visible=False,
+            OpenAndRepair=False,
+            NoEncodingDialog=True,
+        )
+        text = str(document.Content.Text or "")
+        yield from _split_text(
+            text,
+            "本文（Word互換形式）",
+            config.chunk_chars,
+            config.chunk_overlap_chars,
+        )
+    finally:
+        if document is not None:
+            try:
+                document.Close(SaveChanges=False)
+            except Exception:
+                pass
+        if application is not None:
+            try:
+                application.Quit(SaveChanges=False)
+            except Exception:
+                pass
+        pythoncom.CoUninitialize()
+
+
 def _extract_pptx(path: Path, config: SearchConfig) -> Iterable[TextChunk]:
     from pptx import Presentation
 
@@ -187,6 +233,58 @@ def _extract_pptx(path: Path, config: SearchConfig) -> Iterable[TextChunk]:
             config.chunk_chars,
             config.chunk_overlap_chars,
         )
+
+
+def _extract_ppt(path: Path, config: SearchConfig) -> Iterable[TextChunk]:
+    """Extract legacy .ppt text through the locally installed PowerPoint."""
+    import pythoncom
+    import win32com.client
+
+    application = None
+    presentation = None
+    pythoncom.CoInitialize()
+    try:
+        application = win32com.client.DispatchEx("PowerPoint.Application")
+        try:
+            application.AutomationSecurity = 3  # msoAutomationSecurityForceDisable
+        except Exception:
+            pass
+        presentation = application.Presentations.Open(
+            FileName=str(path),
+            ReadOnly=True,
+            Untitled=False,
+            WithWindow=False,
+        )
+        for slide_number in range(1, presentation.Slides.Count + 1):
+            slide = presentation.Slides.Item(slide_number)
+            texts: list[str] = []
+            for shape_number in range(1, slide.Shapes.Count + 1):
+                shape = slide.Shapes.Item(shape_number)
+                try:
+                    if shape.HasTextFrame and shape.TextFrame.HasText:
+                        value = str(shape.TextFrame.TextRange.Text or "").strip()
+                        if value:
+                            texts.append(value)
+                except Exception:
+                    continue
+            yield from _split_text(
+                "\n".join(texts),
+                f"スライド{slide_number}（PowerPoint互換形式）",
+                config.chunk_chars,
+                config.chunk_overlap_chars,
+            )
+    finally:
+        if presentation is not None:
+            try:
+                presentation.Close()
+            except Exception:
+                pass
+        if application is not None:
+            try:
+                application.Quit()
+            except Exception:
+                pass
+        pythoncom.CoUninitialize()
 
 
 def _extract_delimited(path: Path, config: SearchConfig, row_limit: int | None = None) -> Iterable[TextChunk]:
@@ -234,7 +332,9 @@ def extract_file(
             ".xlsx": _extract_xlsx,
             ".xls": _extract_xls,
             ".docx": _extract_docx,
+            ".doc": _extract_doc,
             ".pptx": _extract_pptx,
+            ".ppt": _extract_ppt,
             ".csv": _extract_delimited,
             ".txt": _extract_plain_text,
         }

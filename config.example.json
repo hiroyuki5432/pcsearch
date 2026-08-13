@@ -9,7 +9,9 @@
     ".xlsx",
     ".xls",
     ".docx",
+    ".doc",
     ".pptx",
+    ".ppt",
     ".csv",
     ".txt"
   ],

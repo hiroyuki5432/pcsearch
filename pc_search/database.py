@@ -72,6 +72,19 @@ CREATE TABLE IF NOT EXISTS index_runs (
     message TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS index_queue (
+    path TEXT PRIMARY KEY,
+    root_path TEXT NOT NULL,
+    extension TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    mtime_ns INTEGER NOT NULL,
+    extraction_hash TEXT NOT NULL,
+    scope_hash TEXT NOT NULL,
+    queued_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_index_queue_scope ON index_queue(scope_hash, queued_at);
+
 CREATE TABLE IF NOT EXISTS app_metadata (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -159,7 +172,7 @@ def initialize(config: SearchConfig) -> None:
                 "UPDATE files SET content_hash=? WHERE id=?", (digest.hexdigest(), file_id)
             )
         connection.execute(
-            "INSERT OR REPLACE INTO app_metadata(key, value) VALUES('schema_version', '4')"
+            "INSERT OR REPLACE INTO app_metadata(key, value) VALUES('schema_version', '5')"
         )
         connection.execute("CREATE INDEX IF NOT EXISTS idx_files_content_hash ON files(content_hash, is_deleted)")
         connection.execute("CREATE INDEX IF NOT EXISTS idx_files_scope ON files(scope_hash, is_deleted)")
@@ -362,6 +375,7 @@ def status(config: SearchConfig) -> dict[str, Any]:
             "issue_signature": f"{config.scope_hash}|0",
             "last_run": None,
             "other_scope_files": 0,
+            "resume_pending": 0,
         }
     with closing(connect(config, readonly=True)) as connection:
         totals = connection.execute(
@@ -385,6 +399,10 @@ def status(config: SearchConfig) -> dict[str, Any]:
         ).fetchone()[0]
         other_scope_files = connection.execute(
             "SELECT COUNT(*) FROM files WHERE is_deleted=0 AND scope_hash<>?",
+            (config.scope_hash,),
+        ).fetchone()[0]
+        resume_pending = connection.execute(
+            "SELECT COUNT(*) FROM index_queue WHERE scope_hash=?",
             (config.scope_hash,),
         ).fetchone()[0]
         last_run = connection.execute(
@@ -418,6 +436,7 @@ def status(config: SearchConfig) -> dict[str, Any]:
         "issue_signature": issue_signature,
         "last_run": dict(last_run) if last_run else None,
         "other_scope_files": other_scope_files,
+        "resume_pending": resume_pending,
         "scope_hash": config.scope_hash,
     }
 
